@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, List, NamedTuple, Optional, Tuple
+from typing import Any, Callable, List, NamedTuple, Optional, Sequence, Tuple
 
 from langchain.agents.agent import Agent, AgentExecutor
+from langchain.agents.agent_types import AgentType
 from langchain.agents.mrkl.prompt import FORMAT_INSTRUCTIONS, PREFIX, SUFFIX
 from langchain.agents.tools import Tool
 from langchain.callbacks.base import BaseCallbackManager
 from langchain.chains import LLMChain
-from langchain.llms.base import BaseLLM
 from langchain.prompts import PromptTemplate
+from langchain.schema import BaseLanguageModel
+from langchain.tools.base import BaseTool
 
 FINAL_ANSWER_ACTION = "Final Answer:"
 
@@ -39,7 +41,8 @@ def get_action_and_input(llm_output: str) -> Tuple[str, str]:
     """
     if FINAL_ANSWER_ACTION in llm_output:
         return "Final Answer", llm_output.split(FINAL_ANSWER_ACTION)[-1].strip()
-    regex = r"Action: (.*?)\nAction Input: (.*)"
+    # \s matches against tab/newline/whitespace
+    regex = r"Action: (.*?)[\n]*Action Input:[\s]*(.*)"
     match = re.search(regex, llm_output, re.DOTALL)
     if not match:
         raise ValueError(f"Could not parse LLM output: `{llm_output}`")
@@ -54,7 +57,7 @@ class ZeroShotAgent(Agent):
     @property
     def _agent_type(self) -> str:
         """Return Identifier of agent type."""
-        return "zero-shot-react-description"
+        return AgentType.ZERO_SHOT_REACT_DESCRIPTION
 
     @property
     def observation_prefix(self) -> str:
@@ -69,7 +72,7 @@ class ZeroShotAgent(Agent):
     @classmethod
     def create_prompt(
         cls,
-        tools: List[Tool],
+        tools: Sequence[BaseTool],
         prefix: str = PREFIX,
         suffix: str = SUFFIX,
         format_instructions: str = FORMAT_INSTRUCTIONS,
@@ -98,8 +101,8 @@ class ZeroShotAgent(Agent):
     @classmethod
     def from_llm_and_tools(
         cls,
-        llm: BaseLLM,
-        tools: List[Tool],
+        llm: BaseLanguageModel,
+        tools: Sequence[BaseTool],
         callback_manager: Optional[BaseCallbackManager] = None,
         prefix: str = PREFIX,
         suffix: str = SUFFIX,
@@ -125,7 +128,7 @@ class ZeroShotAgent(Agent):
         return cls(llm_chain=llm_chain, allowed_tools=tool_names, **kwargs)
 
     @classmethod
-    def _validate_tools(cls, tools: List[Tool]) -> None:
+    def _validate_tools(cls, tools: Sequence[BaseTool]) -> None:
         for tool in tools:
             if tool.description is None:
                 raise ValueError(
@@ -153,7 +156,7 @@ class MRKLChain(AgentExecutor):
 
     @classmethod
     def from_chains(
-        cls, llm: BaseLLM, chains: List[ChainConfig], **kwargs: Any
+        cls, llm: BaseLanguageModel, chains: List[ChainConfig], **kwargs: Any
     ) -> AgentExecutor:
         """User friendly way to initialize the MRKL chain.
 
@@ -191,7 +194,11 @@ class MRKLChain(AgentExecutor):
                 mrkl = MRKLChain.from_chains(llm, chains)
         """
         tools = [
-            Tool(name=c.action_name, func=c.action, description=c.action_description)
+            Tool(
+                name=c.action_name,
+                func=c.action,
+                description=c.action_description,
+            )
             for c in chains
         ]
         agent = ZeroShotAgent.from_llm_and_tools(llm, tools)

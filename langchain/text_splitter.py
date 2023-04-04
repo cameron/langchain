@@ -1,6 +1,7 @@
 """Functionality for splitting text."""
 from __future__ import annotations
 
+import copy
 import logging
 from abc import ABC, abstractmethod
 from typing import (
@@ -51,7 +52,10 @@ class TextSplitter(ABC):
         documents = []
         for i, text in enumerate(texts):
             for chunk in self.split_text(text):
-                documents.append(Document(page_content=chunk, metadata=_metadatas[i]))
+                new_doc = Document(
+                    page_content=chunk, metadata=copy.deepcopy(_metadatas[i])
+                )
+                documents.append(new_doc)
         return documents
 
     def split_documents(self, documents: List[Document]) -> List[Document]:
@@ -71,12 +75,17 @@ class TextSplitter(ABC):
     def _merge_splits(self, splits: Iterable[str], separator: str) -> List[str]:
         # We now want to combine these smaller pieces into medium size
         # chunks to send to the LLM.
+        separator_len = self._length_function(separator)
+
         docs = []
         current_doc: List[str] = []
         total = 0
         for d in splits:
             _len = self._length_function(d)
-            if total + _len >= self._chunk_size:
+            if (
+                total + _len + (separator_len if len(current_doc) > 0 else 0)
+                > self._chunk_size
+            ):
                 if total > self._chunk_size:
                     logger.warning(
                         f"Created a chunk of size {total}, "
@@ -90,12 +99,16 @@ class TextSplitter(ABC):
                     # - we have a larger chunk than in the chunk overlap
                     # - or if we still have any chunks and the length is long
                     while total > self._chunk_overlap or (
-                        total + _len > self._chunk_size and total > 0
+                        total + _len + (separator_len if len(current_doc) > 0 else 0)
+                        > self._chunk_size
+                        and total > 0
                     ):
-                        total -= self._length_function(current_doc[0])
+                        total -= self._length_function(current_doc[0]) + (
+                            separator_len if len(current_doc) > 1 else 0
+                        )
                         current_doc = current_doc[1:]
             current_doc.append(d)
-            total += _len
+            total += _len + (separator_len if len(current_doc) > 1 else 0)
         doc = self._join_docs(current_doc, separator)
         if doc is not None:
             docs.append(doc)
@@ -250,7 +263,7 @@ class RecursiveCharacterTextSplitter(TextSplitter):
         # Now go merging things, recursively splitting longer texts.
         _good_splits = []
         for s in splits:
-            if len(s) < self._chunk_size:
+            if self._length_function(s) < self._chunk_size:
                 _good_splits.append(s)
             else:
                 if _good_splits:
@@ -309,3 +322,84 @@ class SpacyTextSplitter(TextSplitter):
         """Split incoming text and return chunks."""
         splits = (str(s) for s in self._tokenizer(text).sents)
         return self._merge_splits(splits, self._separator)
+
+
+class MarkdownTextSplitter(RecursiveCharacterTextSplitter):
+    """Attempts to split the text along Markdown-formatted headings."""
+
+    def __init__(self, **kwargs: Any):
+        """Initialize a MarkdownTextSplitter."""
+        separators = [
+            # First, try to split along Markdown headings (starting with level 2)
+            "\n## ",
+            "\n### ",
+            "\n#### ",
+            "\n##### ",
+            "\n###### ",
+            # Note the alternative syntax for headings (below) is not handled here
+            # Heading level 2
+            # ---------------
+            # End of code block
+            "```\n\n",
+            # Horizontal lines
+            "\n\n***\n\n",
+            "\n\n---\n\n",
+            "\n\n___\n\n",
+            # Note that this splitter doesn't handle horizontal lines defined
+            # by *three or more* of ***, ---, or ___, but this is not handled
+            "\n\n",
+            "\n",
+            " ",
+            "",
+        ]
+        super().__init__(separators=separators, **kwargs)
+
+
+class LatexTextSplitter(RecursiveCharacterTextSplitter):
+    """Attempts to split the text along Latex-formatted layout elements."""
+
+    def __init__(self, **kwargs: Any):
+        """Initialize a LatexTextSplitter."""
+        separators = [
+            # First, try to split along Latex sections
+            "\n\\chapter{",
+            "\n\\section{",
+            "\n\\subsection{",
+            "\n\\subsubsection{",
+            # Now split by environments
+            "\n\\begin{enumerate}",
+            "\n\\begin{itemize}",
+            "\n\\begin{description}",
+            "\n\\begin{list}",
+            "\n\\begin{quote}",
+            "\n\\begin{quotation}",
+            "\n\\begin{verse}",
+            "\n\\begin{verbatim}",
+            ## Now split by math environments
+            "\n\\begin{align}",
+            "$$",
+            "$",
+            # Now split by the normal type of lines
+            " ",
+            "",
+        ]
+        super().__init__(separators=separators, **kwargs)
+
+
+class PythonCodeTextSplitter(RecursiveCharacterTextSplitter):
+    """Attempts to split the text along Python syntax."""
+
+    def __init__(self, **kwargs: Any):
+        """Initialize a MarkdownTextSplitter."""
+        separators = [
+            # First, try to split along class definitions
+            "\nclass ",
+            "\ndef ",
+            "\n\tdef ",
+            # Now split by the normal type of lines
+            "\n\n",
+            "\n",
+            " ",
+            "",
+        ]
+        super().__init__(separators=separators, **kwargs)

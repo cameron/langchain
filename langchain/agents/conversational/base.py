@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 from langchain.agents.agent import Agent
+from langchain.agents.agent_types import AgentType
 from langchain.agents.conversational.prompt import FORMAT_INSTRUCTIONS, PREFIX, SUFFIX
-from langchain.agents.tools import Tool
 from langchain.callbacks.base import BaseCallbackManager
 from langchain.chains import LLMChain
-from langchain.llms import BaseLLM
 from langchain.prompts import PromptTemplate
+from langchain.schema import BaseLanguageModel
+from langchain.tools.base import BaseTool
 
 
 class ConversationalAgent(Agent):
@@ -21,7 +22,7 @@ class ConversationalAgent(Agent):
     @property
     def _agent_type(self) -> str:
         """Return Identifier of agent type."""
-        return "conversational-react-description"
+        return AgentType.CONVERSATIONAL_REACT_DESCRIPTION
 
     @property
     def observation_prefix(self) -> str:
@@ -36,7 +37,7 @@ class ConversationalAgent(Agent):
     @classmethod
     def create_prompt(
         cls,
-        tools: List[Tool],
+        tools: Sequence[BaseTool],
         prefix: str = PREFIX,
         suffix: str = SUFFIX,
         format_instructions: str = FORMAT_INSTRUCTIONS,
@@ -78,7 +79,7 @@ class ConversationalAgent(Agent):
     def _extract_tool_and_input(self, llm_output: str) -> Optional[Tuple[str, str]]:
         if f"{self.ai_prefix}:" in llm_output:
             return self.ai_prefix, llm_output.split(f"{self.ai_prefix}:")[-1].strip()
-        regex = r"Action: (.*?)\nAction Input: (.*)"
+        regex = r"Action: (.*?)[\n]*Action Input: (.*)"
         match = re.search(regex, llm_output)
         if not match:
             raise ValueError(f"Could not parse LLM output: `{llm_output}`")
@@ -89,8 +90,8 @@ class ConversationalAgent(Agent):
     @classmethod
     def from_llm_and_tools(
         cls,
-        llm: BaseLLM,
-        tools: List[Tool],
+        llm: BaseLanguageModel,
+        tools: Sequence[BaseTool],
         callback_manager: Optional[BaseCallbackManager] = None,
         prefix: str = PREFIX,
         suffix: str = SUFFIX,
